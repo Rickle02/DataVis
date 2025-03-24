@@ -89,28 +89,11 @@ app.layout = html.Div([
                           title="Correlation Matrix of 5G Metrics (Excluding Slice Type)"
                       ))
         ]),
-        dcc.Tab(label="📉 Network Load Impact on Delay", children=[
-            dcc.Dropdown(
-                id='bubble-category-filter',
-                options=[{'label': cat, 'value': cat} for cat in sorted(df["Lte/5G Category"].dropna().unique())] + [
-                    {'label': 'All', 'value': 'All'}],
-                value='All',
-                clearable=False,
-                placeholder="Select LTE/5G Category",
-                style={'width': '50%', 'margin': '20px auto'}
-            ),
-            dcc.Graph(id="bubble-chart")
+        dcc.Tab(label="📊 Usage Over Time by Slice Type", children=[
+            html.Div(id="slice-usage-container")
         ]),
-        dcc.Tab(label="📦 IoT Load Distribution", children=[
-            dcc.Graph(
-                id="boxplot",
-                figure=px.box(
-                    df, x="Lte/5G Category", y="Iot",
-                    title="Distribution of IoT Devices across LTE/5G Categories",
-                    color="Lte/5G Category",
-                    color_discrete_sequence=px.colors.qualitative.Set3
-                )
-            )
+        dcc.Tab(label="📦 Slice Type vs Use Case Activation", children=[
+            html.Div(id="slice-usecase-heatmap-container")
         ]),
         dcc.Tab(label="⏱ Network Stability Over Time", children=[
             dcc.Graph(
@@ -136,16 +119,8 @@ app.layout = html.Div([
                 )
             )
         ]),
-        dcc.Tab(label="🌇 Smart City Pressure vs Delay", children=[
-            dcc.Graph(
-                id="smart-city-scatter",
-                figure=px.scatter(
-                    df, x="Smart City & Home", y="Packet Delay",
-                    color="Lte/5G Category",
-                    title="Impact of Smart City Load on Packet Delay",
-                    color_discrete_sequence=px.colors.qualitative.Bold
-                )
-            )
+        dcc.Tab(label="📱 Smartphone vs Others: Delay", children=[
+            html.Div(id="smartphone-delay-boxplot-container")
         ]),
         # dcc.Tab(label="📈 GBR Efficiency vs Delay", children=[
         #     dcc.Graph(
@@ -174,14 +149,13 @@ app.layout = html.Div([
         # ]),
         dcc.Tab(label="🔄 GBR vs Non-GBR with other factors", children=[
             html.Div([
-                html.Label("Overlay line(s) to compare (max 5):", style={"fontWeight": "bold", "margin": "10px"}),
                 dcc.Dropdown(
                     id="line-feature-selector",
                     options=[{"label": f, "value": f} for f in available_line_features],
                     multi=True,
                     placeholder="Select factors to compare",
                     maxHeight=150,
-                    style={"width": "80%", "margin": "0 auto 20px"},
+                    style={"width": "80%", "margin": "10px auto 20px"},
                     value=[]
                 ),
                 dcc.Graph(id="gbr-non-gbr-iot")
@@ -295,26 +269,73 @@ def update_bar_chart(category, data):
     return fig
 
 
-# Bubble chart
+# # Bubble chart
+# @app.callback(
+#     Output("bubble-chart", "figure"),
+#     Input("bubble-category-filter", "value"),
+#     Input("stored-data", "data")
+# )
+# def update_bubble_chart(category, data):
+#     df = pd.DataFrame(data)
+#     if category != "All":
+#         df = df[df["Lte/5G Category"] == category]
+#     return px.scatter(
+#         df,
+#         x="Packet Loss Rate", y="Packet Delay",
+#         size="Iot Devices" if "Iot Devices" in df.columns else None,
+#         color="Lte/5G Category",
+#         title="Packet Loss vs Delay (Bubble Size = IoT Devices)",
+#         color_discrete_sequence=px.colors.qualitative.Vivid
+#     )
+
+#Slice Type vs Use Case Activation
 @app.callback(
-    Output("bubble-chart", "figure"),
-    Input("bubble-category-filter", "value"),
+    Output("slice-usecase-heatmap-container", "children"),
+    Input("dataset-selector", "value"),
     Input("stored-data", "data")
 )
-def update_bubble_chart(category, data):
+def update_slice_usecase_heatmap(dataset, data):
+    import plotly.express as px
+    import pandas as pd
+
+    if dataset != "data/train_dataset.csv":
+        return html.Div("This visualization is only available for the training dataset.",
+                        style={"textAlign": "center", "marginTop": "20px", "color": "gray"})
+
     df = pd.DataFrame(data)
-    if category != "All":
-        df = df[df["Lte/5G Category"] == category]
-    return px.scatter(
-        df,
-        x="Packet Loss Rate", y="Packet Delay",
-        size="Iot Devices" if "Iot Devices" in df.columns else None,
-        color="Lte/5G Category",
-        title="Packet Loss vs Delay (Bubble Size = IoT Devices)",
-        color_discrete_sequence=px.colors.qualitative.Vivid
+    df.columns = df.columns.str.strip().str.title()
+
+    use_cases = [
+        "Healthcare", "Industry 4.0", "Iot Devices",
+        "Public Safety", "Smart City & Home", "Smart Transportation"
+    ]
+
+    heat_df = df.groupby("Slice Type")[use_cases].sum().reset_index()
+    heat_df = heat_df.melt(id_vars="Slice Type", var_name="Use Case", value_name="Count")
+
+    fig = px.density_heatmap(
+        heat_df,
+        x="Use Case", y="Slice Type", z="Count",
+        color_continuous_scale="Blues",
+        title="Slice Type vs Use Case Activation (Count)",
     )
 
+    fig.update_layout(
+        title="Slice Type vs Use Case Activation<br>(Color: Avg Packet Delay, Text: Activation Count)",
+        xaxis_title="Use Case",
+        yaxis_title="Slice Type",
+        yaxis=dict(
+            tickmode='array',
+            tickvals=[1, 2, 3],
+            ticktext=["1  ", "2  ", "3  "],
+            side='left',  # ✅ Back to left side
+            tickfont=dict(size=14),
+            automargin=True,
+        ),
+        margin=dict(t=60, b=80, l=60, r=60)  # ✅ Add more left space
+    )
 
+    return dcc.Graph(figure=fig)
 # gbr
 @app.callback(
     Output("gbr-non-gbr-iot", "figure"),
@@ -378,6 +399,79 @@ def update_gbr_non_gbr_iot(data, selected_features):
 
     return fig
 
+#Slice
+@app.callback(
+    Output("slice-usage-container", "children"),
+    Input("dataset-selector", "value"),
+    Input("stored-data", "data")
+)
+def update_slice_usage_tab(dataset, data):
+    if dataset != "data/train_dataset.csv":
+        return html.Div("Slice Type distribution over time is only available for the training dataset.",
+                        style={"textAlign": "center", "marginTop": "20px", "color": "gray"})
+
+    df = pd.DataFrame(data)
+    if "Slice Type" not in df.columns or "Time" not in df.columns:
+        return html.Div("Slice Type or Time column not found in dataset.",
+                        style={"textAlign": "center", "marginTop": "20px", "color": "red"})
+
+    usage_time = df.groupby(['Time', 'Slice Type']).size().reset_index(name='Count')
+
+    fig = px.area(
+        usage_time,
+        x="Time",
+        y="Count",
+        color="Slice Type",
+        title="Usage Over Time by Slice Type",
+        labels={"Count": "Connection Count", "Time": "Time"},
+        color_discrete_sequence=px.colors.qualitative.Set2
+    )
+
+    fig.update_layout(
+        legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
+        margin=dict(t=60, b=100)
+    )
+
+    return dcc.Graph(figure=fig)
+
+#Smart
+@app.callback(
+    Output("smartphone-delay-boxplot-container", "children"),
+    Input("dataset-selector", "value"),
+    Input("stored-data", "data")
+)
+def update_smartphone_delay_plot(dataset, data):
+    import pandas as pd
+    import plotly.express as px
+
+    df = pd.DataFrame(data)
+    df.columns = df.columns.str.strip().str.title()
+
+    if "Smartphone" not in df.columns or "Packet Delay" not in df.columns:
+        return html.Div("Required columns not found in dataset.",
+                        style={"textAlign": "center", "marginTop": "20px", "color": "red"})
+
+    df["Device Type"] = df["Smartphone"].map({1: "Smartphone", 0: "Other"})
+
+    custom_colors = {
+        "Smartphone": "#d95f0e",  # orange-brown
+        "Other": "#fec44f"        # golden yellow
+    }
+
+    fig = px.box(
+        df, x="Device Type", y="Packet Delay", color="Device Type",
+        title="Packet Delay: Smartphone vs Other Devices",
+        color_discrete_map=custom_colors
+    )
+
+    fig.update_layout(
+        margin=dict(t=60, b=80),
+        xaxis_title="Device Type",
+        yaxis_title="Packet Delay (ms)",
+        showlegend=False
+    )
+
+    return dcc.Graph(figure=fig)
 
 # pie chart
 @app.callback(
