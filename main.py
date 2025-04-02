@@ -2,19 +2,14 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objs as go
 import dash
+import numpy as np
 from dash import dcc, html
 from dash.dependencies import Input, Output
-
-
-# Load data
-# df = pd.read_csv("data/train_dataset.csv")
-# df.columns = df.columns.str.strip().str.title()
 
 def load_dataset(path):
     df = pd.read_csv(path)
     df.columns = df.columns.str.strip().str.title()
     return df
-
 
 DEFAULT_DATASET = "data/train_dataset.csv"
 df = load_dataset(DEFAULT_DATASET)
@@ -50,7 +45,6 @@ def filter_data(category):
         return df
     return df[df["Lte/5G Category"] == category]
 
-
 # Layout
 app.layout = html.Div([
     html.Label("Select Dataset:", style={"fontWeight": "bold", "margin": "10px"}),
@@ -66,7 +60,7 @@ app.layout = html.Div([
     ),
     dcc.Store(id="stored-data"),  # 🔹 Added to store loaded dataset
     dcc.Tabs([
-        dcc.Tab(label="🔧 Network Delay by Category", children=[
+        dcc.Tab(label="Network Delay by Category", children=[
             dcc.Dropdown(
                 id='category-filter',
                 options=[{'label': cat, 'value': cat} for cat in sorted(df["Lte/5G Category"].dropna().unique())] + [
@@ -78,7 +72,13 @@ app.layout = html.Div([
             ),
             dcc.Graph(id="bar-chart")
         ]),
-        dcc.Tab(label="📊 Correlation of Network Features", children=[
+        dcc.Tab(label="CDF of Packet Delay", children=[
+            html.Div(id="cdf-packet-delay")
+        ]),
+        dcc.Tab(label="Smartphone vs Others: Delay", children=[
+            html.Div(id="smartphone-delay-boxplot-container")
+        ]),
+        dcc.Tab(label="Correlation of Network Features", children=[
             dcc.Graph(id="heatmap",
                       style={"height": "800px"},
                       figure=px.imshow(
@@ -89,65 +89,16 @@ app.layout = html.Div([
                           title="Correlation Matrix of 5G Metrics (Excluding Slice Type)"
                       ))
         ]),
-        dcc.Tab(label="📊 Usage Over Time by Slice Type", children=[
+        dcc.Tab(label="Usage Over Time by Slice Type", children=[
             html.Div(id="slice-usage-container")
         ]),
-        dcc.Tab(label="📦 Slice Type vs Use Case Activation", children=[
+        dcc.Tab(label="Slice Type vs Use Case Activation", children=[
             html.Div(id="slice-usecase-heatmap-container")
         ]),
-        dcc.Tab(label="⏱ Network Stability Over Time", children=[
-            dcc.Graph(
-                id="line-chart",
-                figure=px.line(
-                    df.sort_values("Time"), x="Time",
-                    y=["Packet Delay", "Packet Loss Rate"],
-                    title="Time Series of Packet Delay and Loss Rate"
-                )
-            )
+        dcc.Tab(label="Slice Type Distribution", children=[
+            html.Div(id="slice-type-container")
         ]),
-        dcc.Tab(label="🧱 Traffic Type Breakdown", children=[
-            dcc.Graph(
-                id="stacked-bar",
-                figure=px.bar(
-                    df.groupby("Lte/5G Category")[["Gbr", "Non-Gbr", "Iot"]].mean().reset_index().melt(
-                        id_vars="Lte/5G Category", var_name="Type", value_name="Value"
-                    ),
-                    x="Lte/5G Category", y="Value", color="Type",
-                    title="Traffic Breakdown: GBR, Non-GBR, and IoT",
-                    barmode="stack",
-                    color_discrete_sequence=px.colors.qualitative.Set2
-                )
-            )
-        ]),
-        dcc.Tab(label="📱 Smartphone vs Others: Delay", children=[
-            html.Div(id="smartphone-delay-boxplot-container")
-        ]),
-        # dcc.Tab(label="📈 GBR Efficiency vs Delay", children=[
-        #     dcc.Graph(
-        #         id="gbr-delay",
-        #         figure=go.Figure(data=[
-        #             go.Bar(
-        #                 name="GBR", x=df["Lte/5G Category"],
-        #                 y=df.groupby("Lte/5G Category")["Gbr"].mean(),
-        #                 marker_color="lightblue"
-        #             ),
-        #             go.Scatter(
-        #                 name="Packet Delay", x=df["Lte/5G Category"],
-        #                 y=df.groupby("Lte/5G Category")["Packet Delay"].mean(),
-        #                 mode="lines+markers", yaxis="y2", line=dict(color="darkred")
-        #             )
-        #         ]).update_layout(
-        #             title="Relationship Between GBR and Packet Delay",
-        #             yaxis=dict(title="GBR"),
-        #             yaxis2=dict(title="Delay", overlaying="y", side="right"),
-        #             barmode="group"
-        #         )
-        #     )
-        # ]),
-        # dcc.Tab(label="📈 Slice Delay & Loss Analysis", children=[
-        #     dcc.Graph(id="slice-delay-loss")
-        # ]),
-        dcc.Tab(label="🔄 GBR vs Non-GBR with other factors", children=[
+        dcc.Tab(label="GBR vs Non-GBR with other factors", children=[
             html.Div([
                 dcc.Dropdown(
                     id="line-feature-selector",
@@ -161,10 +112,7 @@ app.layout = html.Div([
                 dcc.Graph(id="gbr-non-gbr-iot")
             ])
         ]),
-        dcc.Tab(label="🥧 Slice Type Distribution", children=[
-            html.Div(id="slice-type-container")
-        ]),
-        dcc.Tab(label="📊 Feature Usage Scatterplot", children=[
+        dcc.Tab(label="Feature Usage Scatterplot", children=[
             dcc.Dropdown(
                 id='scatter-feature-dropdown',
                 options=[
@@ -199,7 +147,7 @@ def update_dataset(path):
     return df.to_dict("records")
 
 
-# Bar chart (delay by category)
+# Network Delay by Category
 @app.callback(
     Output("bar-chart", "figure"),
     Input("category-filter", "value"),
@@ -245,8 +193,8 @@ def update_bar_chart(category, data):
         barmode="stack",
         title="Average Packet Delay and Packet Loss Rate by LTE/5G Category",
         color_discrete_map={
-            "Packet Delay": "#1f77b4",
-            "Packet Loss Rate (%)": "#2ecc71"
+            "Packet Delay": "#fc8d62",  # soft orange
+            "Packet Loss Rate (%)": "#66c2a5"  # green
         }
     )
 
@@ -268,36 +216,129 @@ def update_bar_chart(category, data):
 
     return fig
 
+#CDF of Packet Delay
+@app.callback(
+    Output("cdf-packet-delay", "children"),
+    Input("dataset-selector", "value"),
+    Input("stored-data", "data")
+)
+def update_cdf_plot(dataset, data):
+    df = pd.DataFrame(data)
+    df.columns = df.columns.str.strip().str.title()
 
-# # Bubble chart
-# @app.callback(
-#     Output("bubble-chart", "figure"),
-#     Input("bubble-category-filter", "value"),
-#     Input("stored-data", "data")
-# )
-# def update_bubble_chart(category, data):
-#     df = pd.DataFrame(data)
-#     if category != "All":
-#         df = df[df["Lte/5G Category"] == category]
-#     return px.scatter(
-#         df,
-#         x="Packet Loss Rate", y="Packet Delay",
-#         size="Iot Devices" if "Iot Devices" in df.columns else None,
-#         color="Lte/5G Category",
-#         title="Packet Loss vs Delay (Bubble Size = IoT Devices)",
-#         color_discrete_sequence=px.colors.qualitative.Vivid
-#     )
+    if "Packet Delay" not in df.columns:
+        return html.Div("Packet Delay column not found.", style={"textAlign": "center", "color": "red"})
 
-#Slice Type vs Use Case Activation
+    sorted_delay = np.sort(df["Packet Delay"])
+    cdf = np.arange(len(sorted_delay)) / float(len(sorted_delay))
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=sorted_delay,
+        y=cdf,
+        mode='lines',
+        name='CDF',
+        line=dict(color='#e6550d', width=2)
+    ))
+
+    fig.update_layout(
+        title="CDF of Packet Delay",
+        xaxis_title="Packet Delay (ms)",
+        yaxis_title="Cumulative Probability",
+        margin=dict(t=60, b=80, l=80, r=60)
+    )
+
+    return dcc.Graph(figure=fig)
+
+
+
+
+# Smartphone vs Others: Delay
+@app.callback(
+    Output("smartphone-delay-boxplot-container", "children"),
+    Input("dataset-selector", "value"),
+    Input("stored-data", "data")
+)
+def update_smartphone_delay_plot(dataset, data):
+    df = pd.DataFrame(data)
+    df.columns = df.columns.str.strip().str.title()
+
+    if "Smartphone" not in df.columns or "Packet Delay" not in df.columns:
+        return html.Div("Required columns not found in dataset.",
+                        style={"textAlign": "center", "marginTop": "20px", "color": "red"})
+
+    df["Device Type"] = df["Smartphone"].map({1: "Smartphone", 0: "Other"})
+
+    custom_colors = {
+        "Smartphone": "#d95f0e",  # orange-brown
+        "Other": "#fec44f"  # golden yellow
+    }
+
+    fig = px.box(
+        df, x="Device Type", y="Packet Delay", color="Device Type",
+        title="Packet Delay: Smartphone vs Other Devices",
+        color_discrete_map=custom_colors
+    )
+
+    fig.update_layout(
+        margin=dict(t=60, b=80),
+        xaxis_title="Device Type",
+        yaxis_title="Packet Delay (ms)",
+        showlegend=False
+    )
+
+    return dcc.Graph(figure=fig)
+
+# Usage Over Time by Slice Type
+@app.callback(
+    Output("slice-usage-container", "children"),
+    Input("dataset-selector", "value"),
+    Input("stored-data", "data")
+)
+def update_slice_usage_tab(dataset, data):
+
+    if dataset != "data/train_dataset.csv":
+        return html.Div("Slice Type distribution over time is only available for the training dataset.",
+                        style={"textAlign": "center", "marginTop": "20px", "color": "gray"})
+
+    df = pd.DataFrame(data)
+    if "Slice Type" not in df.columns or "Time" not in df.columns:
+        return html.Div("Slice Type or Time column not found in dataset.",
+                        style={"textAlign": "center", "marginTop": "20px", "color": "red"})
+
+    # Map Slice Type numbers to names
+    slice_type_map = {1: "eMBB", 2: "URLLC", 3: "mMTC"}
+    df["Slice Type Name"] = df["Slice Type"].map(slice_type_map)
+
+    # Group by time and slice type name
+    usage_time = df.groupby(['Time', 'Slice Type Name']).size().reset_index(name='Count')
+
+    fig = px.area(
+        usage_time,
+        x="Time",
+        y="Count",
+        color="Slice Type Name",
+        title="Usage Over Time by Slice Type",
+        labels={"Count": "Connection Count", "Time": "Time", "Slice Type Name": "Slice Type"},
+        color_discrete_sequence=px.colors.qualitative.Set2
+    )
+
+    fig.update_layout(
+        legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
+        margin=dict(t=60, b=100)
+    )
+
+    return dcc.Graph(figure=fig)
+
+
+
+# Slice Type vs Use Case Activation
 @app.callback(
     Output("slice-usecase-heatmap-container", "children"),
     Input("dataset-selector", "value"),
     Input("stored-data", "data")
 )
 def update_slice_usecase_heatmap(dataset, data):
-    import plotly.express as px
-    import pandas as pd
-
     if dataset != "data/train_dataset.csv":
         return html.Div("This visualization is only available for the training dataset.",
                         style={"textAlign": "center", "marginTop": "20px", "color": "gray"})
@@ -305,38 +346,96 @@ def update_slice_usecase_heatmap(dataset, data):
     df = pd.DataFrame(data)
     df.columns = df.columns.str.strip().str.title()
 
+    # Map Slice Type to names
+    slice_type_map = {1: "eMBB", 2: "URLLC", 3: "mMTC"}
+    df["Slice Type Label"] = df["Slice Type"].map(slice_type_map)
+
     use_cases = [
         "Healthcare", "Industry 4.0", "Iot Devices",
         "Public Safety", "Smart City & Home", "Smart Transportation"
     ]
 
-    heat_df = df.groupby("Slice Type")[use_cases].sum().reset_index()
-    heat_df = heat_df.melt(id_vars="Slice Type", var_name="Use Case", value_name="Count")
+    heat_df = df.groupby("Slice Type Label")[use_cases].sum().reset_index()
+    heat_df = heat_df.melt(id_vars="Slice Type Label", var_name="Use Case", value_name="Count")
 
     fig = px.density_heatmap(
         heat_df,
-        x="Use Case", y="Slice Type", z="Count",
+        x="Use Case",
+        y="Slice Type Label",
+        z="Count",
         color_continuous_scale="Blues",
-        title="Slice Type vs Use Case Activation (Count)",
+        title="Slice Type vs Use Case Activation (Count)"
     )
 
     fig.update_layout(
-        title="Slice Type vs Use Case Activation<br>(Color: Avg Packet Delay, Text: Activation Count)",
+        title="Slice Type vs Use Case Activation<br>(Color: Activation Count)",
         xaxis_title="Use Case",
         yaxis_title="Slice Type",
         yaxis=dict(
-            tickmode='array',
-            tickvals=[1, 2, 3],
-            ticktext=["1  ", "2  ", "3  "],
-            side='left',  # ✅ Back to left side
             tickfont=dict(size=14),
-            automargin=True,
+            automargin=True
         ),
-        margin=dict(t=60, b=80, l=60, r=60)  # ✅ Add more left space
+        margin=dict(t=60, b=80, l=80, r=60)
     )
 
     return dcc.Graph(figure=fig)
-# gbr
+
+
+# Slice Type Distribution
+@app.callback(
+    Output("slice-type-container", "children"),
+    Input("dataset-selector", "value"),
+    Input("stored-data", "data")
+)
+def update_slice_type_tab(dataset, data):
+    if dataset != "data/train_dataset.csv":
+        return html.Div("Slice Type distribution is only available for the training dataset.",
+                        style={"textAlign": "center", "marginTop": "20px", "color": "gray"})
+
+    df = pd.DataFrame(data)
+    if "Slice Type" not in df.columns:
+        return html.Div("Slice Type column not found in dataset.",
+                        style={"textAlign": "center", "marginTop": "20px", "color": "red"})
+
+    slice_counts = df["Slice Type"].value_counts().sort_index().reset_index()
+    slice_counts.columns = ["Slice Type", "Count"]
+
+    # ✅ Map numbers to names
+    slice_counts["Slice Type"] = slice_counts["Slice Type"].map({
+        1: "eMBB",
+        2: "URLLC",
+        3: "mMTC"
+    })
+
+    fig = px.pie(
+        slice_counts,
+        names="Slice Type",
+        values="Count",
+        title="Distribution of 5G Slice Types (eMBB, URLLC, mMTC)",
+        color_discrete_sequence=px.colors.sequential.Blues[::-1]
+    )
+
+    fig.update_traces(
+        textinfo='percent+label',
+        textposition='outside',
+        pull=[0.05] * len(slice_counts),
+        showlegend=True
+    )
+
+    fig.update_layout(
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.2,
+            xanchor="center",
+            x=0.5
+        ),
+        margin=dict(t=50, b=100)
+    )
+
+    return dcc.Graph(figure=fig)
+
+# gbr-non-gbr
 @app.callback(
     Output("gbr-non-gbr-iot", "figure"),
     Input("stored-data", "data"),
@@ -370,11 +469,6 @@ def update_gbr_non_gbr_iot(data, selected_features):
         "#c0392b",  # dark red
     ]
 
-    # Limit selected features to max 5
-    # max_features = 5
-    # if len(selected_features) > max_features:
-    #     selected_features = selected_features[:max_features]
-
     # Add overlay line traces for selected features
     for i, feature in enumerate(selected_features):  # No limit now!
         fig.add_trace(go.Scatter(
@@ -399,134 +493,7 @@ def update_gbr_non_gbr_iot(data, selected_features):
 
     return fig
 
-#Slice
-@app.callback(
-    Output("slice-usage-container", "children"),
-    Input("dataset-selector", "value"),
-    Input("stored-data", "data")
-)
-def update_slice_usage_tab(dataset, data):
-    if dataset != "data/train_dataset.csv":
-        return html.Div("Slice Type distribution over time is only available for the training dataset.",
-                        style={"textAlign": "center", "marginTop": "20px", "color": "gray"})
-
-    df = pd.DataFrame(data)
-    if "Slice Type" not in df.columns or "Time" not in df.columns:
-        return html.Div("Slice Type or Time column not found in dataset.",
-                        style={"textAlign": "center", "marginTop": "20px", "color": "red"})
-
-    usage_time = df.groupby(['Time', 'Slice Type']).size().reset_index(name='Count')
-
-    fig = px.area(
-        usage_time,
-        x="Time",
-        y="Count",
-        color="Slice Type",
-        title="Usage Over Time by Slice Type",
-        labels={"Count": "Connection Count", "Time": "Time"},
-        color_discrete_sequence=px.colors.qualitative.Set2
-    )
-
-    fig.update_layout(
-        legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
-        margin=dict(t=60, b=100)
-    )
-
-    return dcc.Graph(figure=fig)
-
-#Smart
-@app.callback(
-    Output("smartphone-delay-boxplot-container", "children"),
-    Input("dataset-selector", "value"),
-    Input("stored-data", "data")
-)
-def update_smartphone_delay_plot(dataset, data):
-    import pandas as pd
-    import plotly.express as px
-
-    df = pd.DataFrame(data)
-    df.columns = df.columns.str.strip().str.title()
-
-    if "Smartphone" not in df.columns or "Packet Delay" not in df.columns:
-        return html.Div("Required columns not found in dataset.",
-                        style={"textAlign": "center", "marginTop": "20px", "color": "red"})
-
-    df["Device Type"] = df["Smartphone"].map({1: "Smartphone", 0: "Other"})
-
-    custom_colors = {
-        "Smartphone": "#d95f0e",  # orange-brown
-        "Other": "#fec44f"        # golden yellow
-    }
-
-    fig = px.box(
-        df, x="Device Type", y="Packet Delay", color="Device Type",
-        title="Packet Delay: Smartphone vs Other Devices",
-        color_discrete_map=custom_colors
-    )
-
-    fig.update_layout(
-        margin=dict(t=60, b=80),
-        xaxis_title="Device Type",
-        yaxis_title="Packet Delay (ms)",
-        showlegend=False
-    )
-
-    return dcc.Graph(figure=fig)
-
-# pie chart
-@app.callback(
-    Output("slice-type-container", "children"),
-    Input("dataset-selector", "value"),
-    Input("stored-data", "data")
-)
-def update_slice_type_tab(dataset, data):
-    if dataset != "data/train_dataset.csv":
-        return html.Div("Slice Type distribution is only available for the training dataset.",
-                        style={"textAlign": "center", "marginTop": "20px", "color": "gray"})
-
-    df = pd.DataFrame(data)
-    if "Slice Type" not in df.columns:
-        return html.Div("Slice Type column not found in dataset.",
-                        style={"textAlign": "center", "marginTop": "20px", "color": "red"})
-
-    slice_counts = df["Slice Type"].value_counts().sort_index().reset_index()
-    slice_counts.columns = ["Slice Type", "Count"]
-
-    # Optional: map numeric slice types to labels
-    slice_counts["Slice Type"] = slice_counts["Slice Type"].map({
-        1: "Type 1", 2: "Type 2", 3: "Type 3"
-    })
-
-    fig = px.pie(
-        slice_counts,
-        names="Slice Type",
-        values="Count",
-        title="Distribution of Slice Types (1, 2, 3)",
-        color_discrete_sequence=px.colors.sequential.Blues[::-1]
-    )
-
-    fig.update_traces(
-        textinfo='percent+label',  # Show label + %
-        textposition='outside',
-        pull=[0.05, 0.05, 0.05],  # Pull each slice slightly
-        showlegend=True
-    )
-
-    fig.update_layout(
-        legend=dict(
-            orientation="h",  # Horizontal legend at bottom
-            yanchor="bottom",
-            y=-0.2,
-            xanchor="center",
-            x=0.5
-        ),
-        margin=dict(t=50, b=100)
-    )
-
-    return dcc.Graph(figure=fig)
-
-
-# Scatterplot feature usage
+# Feature usage scatterplot
 @app.callback(
     Output("scatter-feature-usage", "figure"),
     Input("scatter-feature-dropdown", "value"),
