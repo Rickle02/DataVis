@@ -6,8 +6,15 @@ import numpy as np
 from dash import dcc, html
 from dash.dependencies import Input, Output
 
+SLICE_TYPE_LABELS = {1: "eMBB", 2: "URLLC", 3: "mMTC"}
+
 def load_dataset(path):
     df = pd.read_csv(path)
+    df.columns = df.columns.str.strip().str.title()
+    return df
+
+def clean_dataframe(data):
+    df = pd.DataFrame(data)
     df.columns = df.columns.str.strip().str.title()
     return df
 
@@ -86,7 +93,7 @@ app.layout = html.Div([
                           .select_dtypes(include='number')
                           .corr(),
                           color_continuous_scale="RdBu",
-                          title="Correlation Matrix of 5G Metrics (Excluding Slice Type)"
+                          title="Correlation Matrix of 5G Metrics"
                       ))
         ]),
         dcc.Tab(label="Usage Over Time by Slice Type", children=[
@@ -223,8 +230,10 @@ def update_bar_chart(category, data):
     Input("stored-data", "data")
 )
 def update_cdf_plot(dataset, data):
-    df = pd.DataFrame(data)
-    df.columns = df.columns.str.strip().str.title()
+    df = clean_dataframe(data)
+
+    # df = pd.DataFrame(data)
+    # df.columns = df.columns.str.strip().str.title()
 
     if "Packet Delay" not in df.columns:
         return html.Div("Packet Delay column not found.", style={"textAlign": "center", "color": "red"})
@@ -260,8 +269,9 @@ def update_cdf_plot(dataset, data):
     Input("stored-data", "data")
 )
 def update_smartphone_delay_plot(dataset, data):
-    df = pd.DataFrame(data)
-    df.columns = df.columns.str.strip().str.title()
+    df = clean_dataframe(data)
+    # df = pd.DataFrame(data)
+    # df.columns = df.columns.str.strip().str.title()
 
     if "Smartphone" not in df.columns or "Packet Delay" not in df.columns:
         return html.Div("Required columns not found in dataset.",
@@ -307,8 +317,8 @@ def update_slice_usage_tab(dataset, data):
                         style={"textAlign": "center", "marginTop": "20px", "color": "red"})
 
     # Map Slice Type numbers to names
-    slice_type_map = {1: "eMBB", 2: "URLLC", 3: "mMTC"}
-    df["Slice Type Name"] = df["Slice Type"].map(slice_type_map)
+    # slice_type_map = {1: "eMBB", 2: "URLLC", 3: "mMTC"}
+    df["Slice Type Name"] = df["Slice Type"].map(SLICE_TYPE_LABELS)
 
     # Group by time and slice type name
     usage_time = df.groupby(['Time', 'Slice Type Name']).size().reset_index(name='Count')
@@ -343,12 +353,14 @@ def update_slice_usecase_heatmap(dataset, data):
         return html.Div("This visualization is only available for the training dataset.",
                         style={"textAlign": "center", "marginTop": "20px", "color": "gray"})
 
-    df = pd.DataFrame(data)
-    df.columns = df.columns.str.strip().str.title()
+    df = clean_dataframe(data)
+
+    # df = pd.DataFrame(data)
+    # df.columns = df.columns.str.strip().str.title()
 
     # Map Slice Type to names
-    slice_type_map = {1: "eMBB", 2: "URLLC", 3: "mMTC"}
-    df["Slice Type Label"] = df["Slice Type"].map(slice_type_map)
+    # slice_type_map = {1: "eMBB", 2: "URLLC", 3: "mMTC"}
+    df["Slice Type Label"] = df["Slice Type"].map(SLICE_TYPE_LABELS)
 
     use_cases = [
         "Healthcare", "Industry 4.0", "Iot Devices",
@@ -364,7 +376,8 @@ def update_slice_usecase_heatmap(dataset, data):
         y="Slice Type Label",
         z="Count",
         color_continuous_scale="Blues",
-        title="Slice Type vs Use Case Activation (Count)"
+        title="Slice Type vs Use Case Activation (Count)",
+        category_orders={"Slice Type Label": ["mMTC", "URLLC", "eMBB"]}  # ✅ Fixed order
     )
 
     fig.update_layout(
